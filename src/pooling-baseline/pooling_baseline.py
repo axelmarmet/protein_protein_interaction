@@ -12,7 +12,6 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import accuracy_score
 
-from ppi_pred.models.encodings.positional_encoding import PositionalEncoding
 from ppi_pred.models.pooling_baseline_model import MLP
 from ppi_pred.dataset.pooling_baseline_dataset import PoolingDataset
 
