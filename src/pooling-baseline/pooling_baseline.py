@@ -12,6 +12,10 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import accuracy_score
 
+from ppi_pred.models.encodings.positional_encoding import PositionalEncoding
+from ppi_pred.models.pooling_baseline_model import MLP
+from ppi_pred.dataset.pooling_baseline_dataset import PoolingDataset
+
 
 def set_seed(seed=44):
     np.random.seed(seed)
@@ -41,6 +45,8 @@ def arg_parse():
                         help='Learning rate.')
     parser.add_argument('--pooling', type=str,
                         help='Type of pooling.')
+    parser.add_argument('--MSA_layer', type=int,
+                        help='Id of the MSA layer (2, 6, or 11).')
     
     parser.set_defaults(
         device='cuda:0',
@@ -51,7 +57,8 @@ def arg_parse():
         weight_decay=1e-5,
         dropout=0.3,
         lr=1e-3,
-        pooling='mean'
+        pooling='mean',
+        MSA_layer=6
     )
     return parser.parse_args()
 
@@ -68,90 +75,6 @@ def build_optimizer(args, params):
     elif args.opt == 'adagrad':
         optimizer = optim.Adagrad(filter_fn, lr=args.lr, weight_decay=weight_decay)
     return optimizer
-
-
-
-
-
-class PoolingDataset(Dataset):
-    def __init__(self, data, dataset_directory, pooling_operation, layers=[2, 6, 11]):
-        self.X = []
-        self.y = []
-
-        for i in range(data.shape[0]):
-            sequence1 = data.iloc[i, 0]
-            sequence2 = data.iloc[i, 1]
-
-            cur_embedding = []
-            for l in layers:
-                embedding1 = torch.load(f"{dataset_directory}/{sequence1}/embeddings_layer_{l}_MSA_Transformer.pt",
-                                        map_location=torch.device('cpu'))
-                embedding2 = torch.load(f"{dataset_directory}/{sequence2}/embeddings_layer_{l}_MSA_Transformer.pt",
-                                        map_location=torch.device('cpu'))
-
-                if(pooling_operation == 'mean'):
-                    embedding1 = embedding1[0].squeeze().mean(dim=0)
-                    embedding2 = embedding2[0].squeeze().mean(dim=0)
-
-                if(pooling_operation == 'max'):
-                    embedding1 = embedding1[0].squeeze().max(dim=0)[0]
-                    embedding2 = embedding2[0].squeeze().max(dim=0)[0]
-        
-                cur_embedding.append(embedding1)
-                cur_embedding.append(embedding2)
-
-
-            self.X.append(torch.cat(cur_embedding, dim=0))
-            self.y.append(int(data.iloc[i, -1]))
-
-        self.input_dim = self.X[-1].size(0)
-
-
-    def __len__(self):
-        return len(self.X)
-
-    def __getitem__(self, idx):
-        return (self.X[idx], self.y[idx])
-
-
-
-
-
-class MLP(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim, args):
-        super(MLP, self).__init__()
-        self.dropout = args.dropout
-        self.num_layers = args.num_layers
-
-        self.lin_layer = nn.ModuleList()
-        self.lin_layer.append(nn.Linear(input_dim, hidden_dim))
-
-        self.batch_norm = nn.ModuleList()
-        self.batch_norm.append(torch.nn.BatchNorm1d(hidden_dim))
-
-        for l in range(args.num_layers - 2):
-            self.lin_layer.append(nn.Linear(hidden_dim, hidden_dim))
-            self.batch_norm.append(torch.nn.BatchNorm1d(hidden_dim))
-
-        self.lin_layer.append(nn.Linear(hidden_dim, 1))
-        self.sigmoid = nn.Sigmoid()
-
-        self.loss_function = nn.BCELoss()
-
-    
-    def forward(self, x):
-        for i in range(len(self.lin_layer) - 1):
-            x = self.lin_layer[i](x)
-            x = self.batch_norm[i](x)
-            x = F.relu(x)
-            x = F.dropout(x, p=self.dropout)
-
-        x = self.lin_layer[len(self.lin_layer) - 1](x)
-        x = self.sigmoid(x).squeeze()
-        return x
-
-    def loss(self, pred, label):
-        return self.loss_function(pred, label.float())
 
 
 def train(dataloaders, input_dim, args):
@@ -187,7 +110,7 @@ def train(dataloaders, input_dim, args):
     final_accs = test(dataloaders, best_model, args)
     print("FINAL MODEL: Train: {:.4f}, Validation: {:.4f}. Test: {:.4f}".format(
             final_accs['train'], final_accs['val'], final_accs['test']))
-    return best_model
+    return best_model, final_accs
 
 
 def test(dataloaders, model, args):
@@ -213,8 +136,6 @@ def test(dataloaders, model, args):
 
 
 if __name__ == "__main__":
-    set_seed()
-
     args = arg_parse()
     if args.pooling not in ['mean', 'max']:
         raise ValueError("Unsupported pooling operation.")
@@ -224,11 +145,12 @@ if __name__ == "__main__":
     labels_file = dataset_directory + "/training_set.pkl"
 
 
-    try:
-        train_dataset = torch.load(f"{dataset_directory}/pooling-datasets/train_dataset_{args.pooling}.pt")
-        val_dataset = torch.load(f"{dataset_directory}/pooling-datasets/val_dataset_{args.pooling}.pt")
-        test_dataset = torch.load(f"{dataset_directory}/pooling-datasets/test_dataset_{args.pooling}.pt")
-    except:
+    accs = np.zeros(5)
+    for seed in range(5):
+        set_seed(seed + 1)
+
+        print(f"Generating dataset {seed + 1}")
+
         data = pd.read_pickle(labels_file)
         valid_instances = []
         for i in range(data.shape[0]):
@@ -252,23 +174,19 @@ if __name__ == "__main__":
         split = [0.8, 0.1, 0.1]
         split_num = [int(split[0] * num_instances), int((split[0] + split[1]) * num_instances)]
 
-        train_dataset = PoolingDataset(data.iloc[:split_num[0], :], dataset_directory, args.pooling)
-        val_dataset = PoolingDataset(data.iloc[split_num[0]:split_num[1], :], dataset_directory, args.pooling)
-        test_dataset = PoolingDataset(data.iloc[split_num[1]:, :], dataset_directory, args.pooling)
-
-        if(not Path(f"{dataset_directory}/pooling-datasets").exists()):
-            os.mkdir(f"{dataset_directory}/pooling-datasets")
-
-        torch.save(train_dataset, f"{dataset_directory}/pooling-datasets/train_dataset_{args.pooling}.pt")
-        torch.save(val_dataset, f"{dataset_directory}/pooling-datasets/val_dataset_{args.pooling}.pt")
-        torch.save(test_dataset, f"{dataset_directory}/pooling-datasets/test_dataset_{args.pooling}.pt")
+        train_dataset = PoolingDataset(data.iloc[:split_num[0], :], dataset_directory, args.pooling, layers=[args.MSA_layer])
+        val_dataset = PoolingDataset(data.iloc[split_num[0]:split_num[1], :], dataset_directory, args.pooling, layers=[args.MSA_layer])
+        test_dataset = PoolingDataset(data.iloc[split_num[1]:, :], dataset_directory, args.pooling, layers=[args.MSA_layer])
 
 
-    input_dim = train_dataset.input_dim
+        input_dim = train_dataset.input_dim
 
-    dataloaders = {}
-    dataloaders['train'] = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    dataloaders['val'] = DataLoader(val_dataset, batch_size=64, shuffle=False)
-    dataloaders['test'] = DataLoader(test_dataset, batch_size=64, shuffle=False)
+        dataloaders = {}
+        dataloaders['train'] = DataLoader(train_dataset, batch_size=64, shuffle=True)
+        dataloaders['val'] = DataLoader(val_dataset, batch_size=64, shuffle=False)
+        dataloaders['test'] = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-    train(dataloaders, input_dim, args)
+        _, acc = train(dataloaders, input_dim, args)
+        accs[seed] = acc['test']
+
+print(f"OVERALL RESULT: {np.mean(accs)} +- {np.std(accs)}")
