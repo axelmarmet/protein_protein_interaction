@@ -87,8 +87,8 @@ def train(dataloaders, input_dim, args):
         total_loss = 0
         model.train()
         for (batch, label) in dataloaders['train']:
-            batch.to(args.device)
-            label.to(args.device)
+            batch = batch.to(args.device)
+            label = label.to(args.device)
             
             opt.zero_grad()
             pred = model(batch)
