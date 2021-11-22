@@ -150,8 +150,7 @@ if __name__ == "__main__":
     config = json.load(open(args.config, "r"))
     set_seed(config["seed"])
 
-    wandb.init(project="ppi_pred", entity="axelmarmet", config=config)
-
+    wandb.init(project="transformer", entity="ppi_pred_dl4nlp")
     # get the dataset
     labels_file = "data/training_set.pkl"
     dataframe = pd.read_pickle(labels_file)
