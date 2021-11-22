@@ -3,7 +3,10 @@ import torch
 from torch import nn
 import torch.optim as optim
 
+from typing import Dict, Any
 from torch import Tensor
+
+import argparse
 
 import pandas as pd
 from torch.utils.data.dataloader import DataLoader
@@ -20,33 +23,43 @@ import pandas as pd
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import random_split
 
+import json
+
+from ppi_pred.utils import set_seed
+
+import wandb
 
 class NaivePPILanguageModel(nn.Module):
 
-    def __init__(self, embedding_dim):
+    def __init__(self, config:Dict[str, Any]):
         super(NaivePPILanguageModel, self).__init__()
+
+        embedding_dim:int = config["e_dim"]
 
         self.embedding_dim = embedding_dim
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=embedding_dim,
-            nhead=8,
-            dim_feedforward=1024,
+            nhead=config["nhead"],
+            dim_feedforward=config["dim_feedforward"],
+            dropout=config["dropout"],
+            norm_first=config["norm_first"]
         )
+
         encoder_norm = nn.LayerNorm(embedding_dim)
 
         self.encoder = nn.TransformerEncoder(
             encoder_layer,
-            2,
-            encoder_norm
+            config["layers"],
+            encoder_norm,
         )
 
         self.classifier = nn.Linear(embedding_dim, 1)
 
         self.positional_encoding = PositionalEncoding(
-            embedding_dim, dropout=0.1, maxlen=MAX_LENGTH)
-        self.fst_seq_encoding = SegmentEncoding(embedding_dim, dropout=0.1)
-        self.snd_seq_encoding = SegmentEncoding(embedding_dim, dropout=0.1)
+            embedding_dim, dropout=config["dropout"], maxlen=MAX_LENGTH)
+        self.fst_seq_encoding = SegmentEncoding(embedding_dim, dropout=config["dropout"])
+        self.snd_seq_encoding = SegmentEncoding(embedding_dim, dropout=config["dropout"])
 
         self.cls_embedding = nn.parameter.Parameter(
             torch.randn(embedding_dim), requires_grad=True)
@@ -57,15 +70,15 @@ class NaivePPILanguageModel(nn.Module):
                       snd_seq: Tensor, snd_seq_pad_mask: Tensor):
         """ forward iteration
         Args:
-            fst_seq (Tensor): shape  `seq_1_len x batch_dim x embedding_dim`
+            fst_seq (Tensor): shape  `batch_dim x seq_1_len x embedding_dim`
             fst_seq_pad_mask (Tensor): shape  `batch_dim x seq_1_len`
-            snd_seq (Tensor): shape `seq_2_len x batch_dim x embedding_dim`
+            snd_seq (Tensor): shape `batch_dim x seq_2_len x embedding_dim`
             snd_seq_pad_mask (Tensor): shape  `batch_dim x seq_2_len`
         """
 
         # validate a bit the inputs
-        fst_seq_len, batch_dim, embedding_dim = fst_seq.shape
-        snd_seq_len, batch_dim_, embedding_dim_ = snd_seq.shape
+        batch_dim, fst_seq_len, embedding_dim = fst_seq.shape
+        batch_dim_, snd_seq_len, embedding_dim_ = snd_seq.shape
         batch_dim__, fst_seq_len_ = fst_seq_pad_mask.shape
         batch_dim___, snd_seq_len_ = snd_seq_pad_mask.shape
 
@@ -75,6 +88,9 @@ class NaivePPILanguageModel(nn.Module):
         assert fst_seq_len == fst_seq_len_, "seq and padding do not have the same seq length"
         assert snd_seq_len == snd_seq_len_, "seq and padding do not have the same seq length"
         assert embedding_dim == embedding_dim_, "embedding dim of the two sequences are not the same"
+
+        fst_seq = fst_seq.transpose(1,0)
+        snd_seq = snd_seq.transpose(1,0)
 
         device = fst_seq.device
 
@@ -105,27 +121,45 @@ class NaivePPILanguageModel(nn.Module):
 
         cls_token_embedding = self.encoder(encoder_input, src_key_padding_mask=padding_mask)[0,:]
 
-        return torch.sigmoid(self.classifier(cls_token_embedding))
+        logits = self.classifier(cls_token_embedding)
 
+        if self.training:
+            return logits
+        else:
+            return torch.sigmoid(logits)
 
-args = Namespace(device="cuda:0")
+if __name__ == "__main__":
 
-labels_file = "data/training_set.pkl"
-dataframe = pd.read_pickle(labels_file)
-dataset_path = "data/MSA_transformer_embeddings"
-layer = 11
-dataset = EmbeddingSeqDataset(dataframe, dataset_path, layer)
-ratios = [29675, 3709, 3709]
+    arg_parser = argparse.ArgumentParser(
+        description="""
+            Train an encoder head on top of the embeddings
+        """
+    )
 
-training_set, validation_set, testing_set = random_split(dataset, ratios)
+    arg_parser.add_argument(
+        "--config", type=str, required=True, help="The config file that contains all hyperparameters"
+    )
+    arg_parser.add_argument(
+        "--device", type=str, default="cuda:0", help="The device on which to run the training (default : \"cuda:0\")"
+    )
 
-model = NaivePPILanguageModel(EMBEDDING_DIM).to(args.device)
-# model = nn.DataParallel(model)
+    args = arg_parser.parse_args()
 
-dataloaders = {}
-dataloaders['train'] = DataLoader(training_set, batch_size=64, shuffle=True, collate_fn=collate_fn)
-dataloaders['val'] = DataLoader(validation_set, batch_size=64, shuffle=True, collate_fn=collate_fn)
-dataloaders['test'] = DataLoader(testing_set, batch_size=64, shuffle=True, collate_fn=collate_fn)
+    assert os.path.exists(args.config), f"file {args.config} does not exist"
 
-best_model = train(dataloaders, model, args, epochs=30)
-torch.save(best_model, "my_best_model")
+    config = json.load(open(args.config, "r"))
+    set_seed(config["seed"])
+
+    wandb.init(project="ppi_pred", entity="axelmarmet", config=config)
+
+    # get the dataset
+    labels_file = "data/training_set.pkl"
+    dataframe = pd.read_pickle(labels_file)
+    dataset_path = "data/MSA_transformer_embeddings"
+    layer = 11
+    dataset = EmbeddingSeqDataset(dataframe, dataset_path, layer, True)
+
+    model = NaivePPILanguageModel(config["architecture"]).to(args.device)
+
+    best_model = train(model, dataset, config["training"], args.device)
+    torch.save(best_model, "my_best_model")
