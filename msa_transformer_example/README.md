@@ -1,6 +1,6 @@
 # MSA Transformer Example
 
-In this folder, we explore contact prediction with the **ESM-1b** and **MSA Transformer** models, in which contact prediction is based on a logistic regression over the model's attention maps. This methodology is based on the ICLR 2021 paper, [Transformer protein language models are unsupervised structure learners](https://openreview.net/pdf?id=fylclEqgvgd).
+[In this notebook](https://github.com/axelmarmet/protein_transformer/blob/main/msa_transformer_example/contact_prediction.ipynb), we explore contact prediction with the **ESM-1b** and **MSA Transformer** models, in which contact prediction is based on a logistic regression over the model's attention maps. This methodology is based on the ICLR 2021 paper, [Transformer protein language models are unsupervised structure learners](https://openreview.net/pdf?id=fylclEqgvgd).
 
 ## a3m files
 
