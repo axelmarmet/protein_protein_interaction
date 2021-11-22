@@ -6,10 +6,7 @@ The .a3m files are MSAs coming from the [trRosetta (v1)](https://yanglab.nankai.
 
 ## MSA?
 
-A multiple sequence alignment consists of a set of evo-
-lutionarily related protein sequences. Since real protein sequences are likely to have insertions, dele-
-tions, and substitutions, the sequences are aligned by minimizing a Levenshtein distance-like metric
-over all the sequences. In practice heuristic alignment schemes are used.
+A multiple sequence alignment consists of a set of evolutionarily related protein sequences. Since real protein sequences are likely to have insertions, deletions, and substitutions, the sequences are aligned by minimizing a Levenshtein distance-like metric over all the sequences. In practice heuristic alignment schemes are used.
 
 ## Contact prediction pipeline
 
@@ -21,7 +18,7 @@ The Transformer is first pretrained (in an unsupervised fashion) on sequences fr
 
 The idea now is to extract residue-residue contact information from the attention maps of the model.
 
-To do so, they first pass the input sequence through the model to obtain the attention maps (one map for each head in each layer). They then symmetrize and apply APC to each attention map independently. The resulting maps are passed through an $L_1$ regularized logistic regression (that has been trained in a supervised fashion on a small number (n ≤ 20) of proteins to determine which attention heads are informative). This logistic regression is applied independently at each amino acid pair (i, j) to extract the contact information.
+To do so, they first pass the input sequence through the model to obtain the attention maps (one map for each head in each layer). They then symmetrize and apply APC to each attention map independently. The resulting maps are passed through an L1 regularized logistic regression (that has been trained in a supervised fashion on a small number (n ≤ 20) of proteins to determine which attention heads are informative). This logistic regression is applied independently at each amino acid pair (i, j) to extract the contact information.
 
 ## Our work
 
