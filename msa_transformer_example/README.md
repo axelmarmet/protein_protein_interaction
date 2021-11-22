@@ -24,4 +24,4 @@ To do so, they first pass the input sequence through the model to obtain the att
 
 ## Our work
 
-In our work (see [`..\src`](https://github.com/axelmarmet/protein_transformer/src)) we will use similar architectures and ideas to predict protein-protein interaction (rather than residue-residue contact).
+In our work (see [`..\src`](https://github.com/axelmarmet/protein_transformer/tree/main/src)) we will use similar architectures and ideas to predict protein-protein interaction (rather than residue-residue contact).
