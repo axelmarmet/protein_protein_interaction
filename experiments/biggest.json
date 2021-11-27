@@ -11,7 +11,7 @@
 
     "architecture":{
         "e_dim"           : 768,
-        "layers"          : 3,
+        "layers"          : 4,
         "dim_feedforward" : 1024,
         "nhead"           : 8,
         "dropout"         : 0.1,

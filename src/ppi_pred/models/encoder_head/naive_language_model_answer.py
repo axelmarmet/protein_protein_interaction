@@ -2,6 +2,9 @@ from argparse import Namespace
 import torch
 from torch import nn
 import torch.optim as optim
+import torch.multiprocessing as mp
+
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from typing import Dict, Any
 from torch import Tensor
@@ -25,7 +28,7 @@ from torch.utils.data import random_split
 
 import json
 
-from ppi_pred.utils import set_seed
+from ppi_pred.utils import cleanup, set_seed, setup
 
 import wandb
 
@@ -128,6 +131,49 @@ class NaivePPILanguageModel(nn.Module):
         else:
             return torch.sigmoid(logits)
 
+def run(args:Namespace, rank:int, world_size:int):
+
+    if args.distributed:
+        setup(rank, world_size)
+
+    assert os.path.exists(args.config), f"file {args.config} does not exist"
+
+    args.world_size = world_size
+    args.rank = rank
+    args.is_main = rank == 0
+    if args.distributed:
+        torch.cuda.device(args.rank)
+        args.device = rank
+
+    config = json.load(open(args.config, "r"))
+    set_seed(config["seed"])
+
+    # get the dataset
+    labels_file = "data/training_set.pkl"
+    dataframe = pd.read_pickle(labels_file)
+    dataset_path = "data/MSA_transformer_embeddings"
+    layer = 11
+    dataset = EmbeddingSeqDataset(dataframe, dataset_path, layer, True)
+
+    model = NaivePPILanguageModel(config["architecture"])
+    model = model.to(args.device)
+
+    if args.distributed:
+        model = DDP(
+            model,
+            device_ids=[args.rank],
+            output_device=args.rank
+        )
+
+    best_model = train(model, dataset, config, args)
+
+    if args.is_main:
+        torch.save(best_model, "my_best_model")
+
+    if args.distributed:
+        cleanup()
+
+
 if __name__ == "__main__":
 
     arg_parser = argparse.ArgumentParser(
@@ -140,25 +186,32 @@ if __name__ == "__main__":
         "--config", type=str, required=True, help="The config file that contains all hyperparameters"
     )
     arg_parser.add_argument(
-        "--device", type=str, default="cuda:0", help="The device on which to run the training (default : \"cuda:0\")"
+        "--device", type=str, default="cpu", help="The device on which to run the training (default : cpu)"
     )
-
+    arg_parser.add_argument('--distributed', dest='distributed', action='store_true', help="""
+        use distributed training, if set then device must not be specified
+    """)
+    arg_parser.set_defaults(feature=True)
     args = arg_parser.parse_args()
 
-    assert os.path.exists(args.config), f"file {args.config} does not exist"
+    assert not (args.distributed and args.device != "cpu"), "flag --distributed cannot be set at the same time that a device is given"
 
-    config = json.load(open(args.config, "r"))
-    set_seed(config["seed"])
+    if args.distributed:
+        # check how many GPUs are available
+        size = torch.cuda.device_count()
 
-    wandb.init(project="transformer", entity="ppi_pred_dl4nlp")
-    # get the dataset
-    labels_file = "data/training_set.pkl"
-    dataframe = pd.read_pickle(labels_file)
-    dataset_path = "data/MSA_transformer_embeddings"
-    layer = 11
-    dataset = EmbeddingSeqDataset(dataframe, dataset_path, layer, True)
+        # spawn that many processes
+        processes = []
+        mp.set_start_method("spawn")
+        for rank in range(size):
+            p = mp.Process(target=run, args=(args, rank, size))
+            p.start()
+            processes.append(p)
 
-    model = NaivePPILanguageModel(config["architecture"]).to(args.device)
+        # wait for all processes to be done to finish
+        for p in processes:
+            p.join()
+    else:
+        run(args, 0, 1)
 
-    best_model = train(model, dataset, config["training"], args.device)
-    torch.save(best_model, "my_best_model")
+
