@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import copy
+import wandb
 
 import torch
 import argparse
@@ -44,12 +45,10 @@ def arg_parse():
                         help='Learning rate.')
     parser.add_argument('--pooling', type=str,
                         help='Type of pooling.')
-    parser.add_argument('--MSA_layer', type=int,
-                        help='Id of the MSA layer (2, 6, or 11).')
     
     parser.set_defaults(
         device='cuda:0',
-        epochs=30,
+        epochs=100,
         hidden_dim=128,
         num_layers=4,
         opt='adam',
@@ -57,7 +56,6 @@ def arg_parse():
         dropout=0.3,
         lr=1e-3,
         pooling='mean',
-        MSA_layer=6
     )
     return parser.parse_args()
 
@@ -81,6 +79,14 @@ def train(dataloaders, input_dim, args):
     model = model_cls(input_dim, args.hidden_dim, args).to(args.device)
     opt = build_optimizer(args, model.parameters())
 
+    if(args.logging):
+        config = {k:v for k, v in vars(args).items() if k not in ["device", "logging"]}
+        wandb.init(
+                project="pooling-baseline",
+                entity="ppi_pred_dl4nlp",
+                config=config
+            )
+
     best_model = model
     val_max = -np.inf
     for epoch in range(args.epochs):
@@ -101,6 +107,14 @@ def train(dataloaders, input_dim, args):
         if val_max < accs['val']:
             val_max = accs['val']
             best_model = copy.deepcopy(model)
+
+        if(args.logging):
+            wandb.log({
+                    "training loss": total_loss,
+                    "training accuracy":accs['train'],
+                    "validation accuracy": accs['val'],
+                    "test accuracy": accs['test']
+                })
 
         print("Epoch {}: Train: {:.4f}, Validation: {:.4f}. Test: {:.4f}, Loss: {:.4f}".format(
             epoch + 1, accs['train'], accs['val'], accs['test'], total_loss))
@@ -147,6 +161,7 @@ if __name__ == "__main__":
     accs = np.zeros(5)
     for seed in range(5):
         set_seed(seed + 1)
+        args.logging = (seed + 1) == 1
 
         print(f"Generating dataset {seed + 1}")
 
@@ -164,7 +179,6 @@ if __name__ == "__main__":
 
             valid_instances.append(i)
 
-
         valid_instances = np.array(valid_instances)
         data = data.iloc[valid_instances, :]
         data = data.sample(frac=1)
@@ -173,9 +187,9 @@ if __name__ == "__main__":
         split = [0.8, 0.1, 0.1]
         split_num = [int(split[0] * num_instances), int((split[0] + split[1]) * num_instances)]
 
-        train_dataset = PoolingDataset(data.iloc[:split_num[0], :], dataset_directory, args.pooling, layers=[args.MSA_layer])
-        val_dataset = PoolingDataset(data.iloc[split_num[0]:split_num[1], :], dataset_directory, args.pooling, layers=[args.MSA_layer])
-        test_dataset = PoolingDataset(data.iloc[split_num[1]:, :], dataset_directory, args.pooling, layers=[args.MSA_layer])
+        train_dataset = PoolingDataset(data.iloc[:split_num[0], :], dataset_directory, args.pooling)
+        val_dataset = PoolingDataset(data.iloc[split_num[0]:split_num[1], :], dataset_directory, args.pooling)
+        test_dataset = PoolingDataset(data.iloc[split_num[1]:, :], dataset_directory, args.pooling)
 
 
         input_dim = train_dataset.input_dim
