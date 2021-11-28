@@ -69,28 +69,13 @@ class NaivePPILanguageModel(nn.Module):
         self.sep_embedding = nn.parameter.Parameter(
             torch.randn(embedding_dim), requires_grad=True)
 
-    def forward(self, fst_seq: Tensor, fst_seq_pad_mask: Tensor,
-                      snd_seq: Tensor, snd_seq_pad_mask: Tensor):
+    def forward(self, inp:EmbeddingSeqInput):
         """ forward iteration
-        Args:
-            fst_seq (Tensor): shape  `batch_dim x seq_1_len x embedding_dim`
-            fst_seq_pad_mask (Tensor): shape  `batch_dim x seq_1_len`
-            snd_seq (Tensor): shape `batch_dim x seq_2_len x embedding_dim`
-            snd_seq_pad_mask (Tensor): shape  `batch_dim x seq_2_len`
         """
+        seq = inp.seq
 
-        # validate a bit the inputs
-        batch_dim, fst_seq_len, embedding_dim = fst_seq.shape
-        batch_dim_, snd_seq_len, embedding_dim_ = snd_seq.shape
-        batch_dim__, fst_seq_len_ = fst_seq_pad_mask.shape
-        batch_dim___, snd_seq_len_ = snd_seq_pad_mask.shape
-
-        assert batch_dim == batch_dim_ and \
-               batch_dim_ == batch_dim__ and \
-               batch_dim__ == batch_dim___, "batch dim of the two sequences are not the same"
-        assert fst_seq_len == fst_seq_len_, "seq and padding do not have the same seq length"
-        assert snd_seq_len == snd_seq_len_, "seq and padding do not have the same seq length"
-        assert embedding_dim == embedding_dim_, "embedding dim of the two sequences are not the same"
+        seq[inp.cls_mask] = self.cls_embedding
+        seq[inp.sep_mask] = self.sep_embedding
 
         fst_seq = fst_seq.transpose(1,0)
         snd_seq = snd_seq.transpose(1,0)
@@ -122,7 +107,7 @@ class NaivePPILanguageModel(nn.Module):
 
         encoder_input = self.positional_encoding(encoder_input)
 
-        cls_token_embedding = self.encoder(encoder_input, src_key_padding_mask=padding_mask)[0,:]
+        cls_token_embedding = self.encoder.forward(encoder_input, src_key_padding_mask=padding_mask)[0,:]
 
         logits = self.classifier(cls_token_embedding)
 

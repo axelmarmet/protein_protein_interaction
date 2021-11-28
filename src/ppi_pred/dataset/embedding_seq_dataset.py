@@ -2,14 +2,25 @@ import os
 
 from pandas import DataFrame
 
+from dataclasses import dataclass
+
 import torch
 from torch.utils.data import Dataset
+import torch.nn as nn
 
 # for typing
 from torch import Tensor
 from typing import List, Tuple
 
 from torch.utils.data.dataset import random_split
+
+@dataclass
+class EmbeddingSeqInput:
+    seq      : Tensor # shape `B x max_seq_len x e_dim`
+    cls_mask : Tensor # shape `B x max_seq_len`
+    sep_mask : Tensor # shape `B x mas_seq_len`
+
+    padding_mask : Tensor # shape `B x max_seq_len`
 
 class EmbeddingSeqDataset(Dataset):
 
@@ -49,28 +60,74 @@ class EmbeddingSeqDataset(Dataset):
 
         return embedding_seq_1, embedding_seq_2, target
 
-    def collate_fn(self, batch):
-        seq_1_batch, seq_2_batch, tgt_batch = [], [], []
-        seq_1_max_len, seq_2_max_len = 0, 0
+    def collate_fn(self, batch)->Tuple[EmbeddingSeqInput, Tensor]:
+        seq_list, cls_mask_list, sep_mask_list, tgt_list = [], [], [], []
+        max_seq_len = -1
         for seq_1, seq_2, tgt in batch:
-            seq_1_max_len = max(seq_1_max_len, seq_1.shape[0])
-            seq_2_max_len = max(seq_2_max_len, seq_2.shape[0])
 
-            seq_1_batch.append(seq_1)
-            seq_2_batch.append(seq_2)
-            tgt_batch.append(torch.tensor(int(tgt), dtype=torch.float32))
+            seq_1_len = seq_1.shape[0]
+            seq_2_len = seq_2.shape[0]
+            seq_len = seq_1_len + seq_2_len + 3
 
-        seq_1_batch, seq_1_padding_mask_batch = self.pad_sequence(seq_1_batch, seq_1_max_len, self.batch_first)
-        seq_2_batch, seq_2_padding_mask_batch = self.pad_sequence(seq_2_batch, seq_2_max_len, self.batch_first)
-        tgt_batch = torch.stack(tgt_batch, dim=0).unsqueeze(dim=1)
+            cls_mask = torch.zeros(seq_len, dtype=torch.bool)
+            cls_mask[0] = 1
 
-        return seq_1_batch, seq_1_padding_mask_batch, \
-           seq_2_batch, seq_2_padding_mask_batch, tgt_batch
+            sep_mask = torch.zeros(seq_len, dtype=torch.bool)
+            sep_mask[seq_1_len+1] = 1
+            sep_mask[-1] = 1
+
+            seq = torch.cat([
+                torch.zeros(self.EMBEDDING_DIM),
+                seq_1_len,
+                torch.zeros(self.EMBEDDING_DIM),
+                seq_2_len,
+                torch.zeros(self.EMBEDDING_DIM)
+            ])
+
+            max_seq_len = max(max_seq_len, seq_len)
+
+            seq_list.append(seq)
+            cls_mask_list.append(cls_mask)
+            sep_mask_list.append(sep_mask)
+            tgt_list.append(tgt)
+
+        padding_masks = []
+        padded_sequences = []
+        padded_cls_mask = []
+        padded_sep_mask = []
+        for seq, cls_mask, sep_mask in zip(seq_list, cls_mask_list, sep_mask_list):
+            seq_len:int = seq.shape[0]
+            padding_length = max_seq_len - seq_len
+
+            padding_masks.append(torch.arange(max_seq_len) > seq_len-1)
+            padded_sequences.append(
+                torch.cat([seq, torch.zeros(padding_length, self.EMBEDDING_DIM)])
+            )
+            padded_cls_mask.append(
+                torch.cat([cls_mask, torch.zeros(padding_length)])
+            )
+            padded_sep_mask.append(
+                torch.cat([sep_mask, torch.zeros(padding_length)])
+            )
+
+        tgt_batch = torch.stack(tgt_list).unsqueeze(-1)
+
+        return EmbeddingSeqInput(
+            seq=torch.stack(padded_sequences),
+            cls_mask=torch.stack(padded_cls_mask),
+            sep_mask=torch.stack(padded_sep_mask),
+            padding_mask=torch.stack(padding_masks)), tgt_batch
+
 
     def split(self):
         return random_split(self, self.RATIOS, generator=torch.Generator().manual_seed(0))
 
-    def pad_sequence(self, sequences:List[Tensor], max_len:int, batch_first:bool)->Tuple[Tensor,Tensor]:
+
+    def get_padding_mask(self, lengths:List[int], max_len : int)->Tensor:
+        padding_masks = [torch.arange(max_len) > seq_len-1 for seq_len in lengths]
+        return torch.stack(padding_masks)
+
+    def pad_sequences(self, sequences:List[Tensor], cls_mask, max_len:int)->Tensor:
         padding_masks = []
         padded_sequences = []
         for seq in sequences:
@@ -78,4 +135,4 @@ class EmbeddingSeqDataset(Dataset):
             padding_masks.append(torch.arange(max_len) > seq_len-1)
             padded_sequences.append(torch.cat((seq, torch.zeros(max_len - seq_len, self.EMBEDDING_DIM))))
 
-        return torch.stack(padded_sequences, dim=0 if batch_first else 1), torch.stack(padding_masks, dim=0)
+        return torch.stack(padded_sequences, dim=0), torch.stack(padding_masks, dim=0)
