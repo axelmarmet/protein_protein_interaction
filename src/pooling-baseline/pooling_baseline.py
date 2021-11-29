@@ -134,7 +134,7 @@ def test(dataloaders, model, args):
         labels = []
         predictions = []
         for (batch, label) in dataloaders[dataset]:
-            batch.to(args.device)
+            batch = batch.to(args.device)
             pred = model(batch)
             predictions.append(pred.round().cpu().detach().numpy())
             labels.append(label.cpu().numpy())
