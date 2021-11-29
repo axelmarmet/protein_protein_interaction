@@ -73,41 +73,25 @@ class NaivePPILanguageModel(nn.Module):
         """ forward iteration
         """
         seq = inp.seq
-
         seq[inp.cls_mask] = self.cls_embedding
         seq[inp.sep_mask] = self.sep_embedding
 
-        fst_seq = fst_seq.transpose(1,0)
-        snd_seq = snd_seq.transpose(1,0)
+        device = seq.device
 
-        device = fst_seq.device
-
-        fst_segment = torch.cat([
-            self.cls_embedding.tile((1, batch_dim, 1)),
-            fst_seq,
-            self.sep_embedding.tile((1, batch_dim, 1))
-        ], 0)
-
-        snd_segment = torch.cat([
-            snd_seq,
-            self.sep_embedding.tile((1, batch_dim, 1))
-        ], 0)
+        fst_segment = seq[inp.segment1_mask]
+        snd_segment = seq[inp.segment2_mask]
 
         fst_segment = self.fst_seq_encoding(fst_segment)
         snd_segment = self.snd_seq_encoding(snd_segment)
 
-        encoder_input = torch.cat([fst_segment, snd_segment], 0)
-        padding_mask = torch.cat([
-            torch.zeros((batch_dim, 1), dtype=torch.bool, device=device), # for cls token
-            fst_seq_pad_mask,
-            torch.zeros((batch_dim, 1), dtype=torch.bool, device=device), # for sep token
-            snd_seq_pad_mask,
-            torch.zeros((batch_dim, 1), dtype=torch.bool, device=device)  # for sep token
-        ], dim=1)
+        encoder_input = torch.zeros(seq.shape)
+        encoder_input[inp.segment1_mask] = fst_segment
+        encoder_input[inp.segment2_mask] = snd_segment
 
+        encoder_input = encoder_input.transpose(0, 1)
         encoder_input = self.positional_encoding(encoder_input)
 
-        cls_token_embedding = self.encoder.forward(encoder_input, src_key_padding_mask=padding_mask)[0,:]
+        cls_token_embedding = self.encoder.forward(encoder_input, src_key_padding_mask=inp.padding_mask)[0,:]
 
         logits = self.classifier(cls_token_embedding)
 
@@ -134,10 +118,15 @@ def run(args:Namespace, rank:int, world_size:int):
     set_seed(config["seed"])
 
     # get the dataset
-    labels_file = "data/training_set.pkl"
+ #   labels_file = "data/training_set.pkl"
+ #   dataframe = pd.read_pickle(labels_file)
+ #   dataset_path = "data/MSA_transformer_embeddings"
+
+    labels_file = "../../../../dataset/training_set.pkl"
     dataframe = pd.read_pickle(labels_file)
-    dataset_path = "data/MSA_transformer_embeddings"
-    layer = 11
+    dataset_path = "../../../../dataset"
+
+    layer = 12
     dataset = EmbeddingSeqDataset(dataframe, dataset_path, layer, True)
 
     model = NaivePPILanguageModel(config["architecture"])

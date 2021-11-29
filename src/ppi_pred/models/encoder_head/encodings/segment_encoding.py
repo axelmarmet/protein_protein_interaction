@@ -35,4 +35,5 @@ class SegmentEncoding(nn.Module):
         Returns:
             Tensor: the sum of the embedding and the positional encoding
         """
+        
         return self.dropout(token_embedding + self.embedding)

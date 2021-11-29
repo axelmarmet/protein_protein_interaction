@@ -79,16 +79,13 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
 
         total_loss = torch.zeros((1), device=args.device)
         model.train()
-        for seq_1, pad_1, seq_2, pad_2, tgt in tqdm(dataloaders['train'], disable=not should_log):
-            seq_1 = seq_1.to(args.device)
-            pad_1 = pad_1.to(args.device)
-            seq_2 = seq_2.to(args.device)
-            pad_2 = pad_2.to(args.device)
+        for batch, tgt in tqdm(dataloaders['train'], disable=not should_log):
+            batch.to(args.device)
             tgt = tgt.to(args.device)
 
             opt.zero_grad()
-            pred = model(seq_1, pad_1, seq_2, pad_2)
-            loss = criterion(pred, tgt)
+            pred = model(batch)
+            loss = criterion(pred, tgt.float())
 
             total_loss += loss
             loss.backward()
@@ -129,12 +126,8 @@ def test(dataloaders, model, device, verbose):
 
         labels = []
         predictions = []
-        for seq_1, pad_1, seq_2, pad_2, tgt in tqdm(dataloaders[dataset], disable=not verbose):
-
-            seq_1 = seq_1.to(device)
-            pad_1 = pad_1.to(device)
-            seq_2 = seq_2.to(device)
-            pad_2 = pad_2.to(device)
+        for batch, tgt in tqdm(dataloaders[dataset], disable=not verbose):
+            batch.to(device)
             tgt = tgt.to(device)
 
             pred = model(seq_1, pad_1, seq_2, pad_2)
