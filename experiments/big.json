@@ -15,6 +15,7 @@
         "dim_feedforward" : 1024,
         "nhead"           : 8,
         "dropout"         : 0.1,
-        "norm_first"      : true
+        "norm_first"      : true,
+        "pos_encoding"    : "sincos"
     }
 }

@@ -4,18 +4,18 @@
     "training":{
         "warmup_steps" : 2000,
         "lr_mult"      : 0.1,
-        "epochs"       : 50,
-        "batch_size"   : 64,
+        "epochs"       : 30,
+        "batch_size"   : 2,
         "pos_weight"   : 4.7714
     },
 
     "architecture":{
         "e_dim"           : 768,
-        "layers"          : 2,
+        "layers"          : 1,
         "dim_feedforward" : 1024,
-        "nhead"           : 8,
+        "nhead"           : 2,
         "dropout"         : 0.1,
         "norm_first"      : true,
-        "pos_encoding"    : "sincos"
+        "pos_encoding"    : "trainable"
     }
 }

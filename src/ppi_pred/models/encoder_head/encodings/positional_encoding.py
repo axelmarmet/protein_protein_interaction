@@ -6,7 +6,7 @@ from torch import nn
 from torch import Tensor
 
 
-class PositionalEncoding(nn.Module):
+class SinCosPositionalEncoding(nn.Module):
     """
     helper Module that adds positional encoding to the token embedding to
     introduce a notion of word order.
@@ -45,3 +45,46 @@ class PositionalEncoding(nn.Module):
             Tensor: the sum of the embedding and the positional encoding
         """
         return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])
+
+
+class TrainablePositionalEncoding(nn.Module):
+    """
+    helper Module that adds trainable positional encoding to the token embedding to
+    introduce a notion of word order.
+    """
+
+    def __init__(self,
+                 emb_size: int,
+                 dropout: float,
+                 maxlen: int = 5000):
+        """init the encoding
+
+        Args:
+            emb_size (int): size of the embedding
+            dropout (float): dropout rate
+            maxlen (int, optional): Maximal sequence length. Defaults to 5000.
+        """
+        super().__init__()
+        pos_embedding = torch.zeros((maxlen, emb_size))
+        pos_embedding = pos_embedding.unsqueeze(-2)
+
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer('pos_embedding', pos_embedding)
+        self._init_positional_embeddings()
+
+
+    def _init_positional_embeddings(self):
+        self.pos_embedding = torch.normal(mean=0, std=1, size=self.pos_embedding.shape)
+
+
+    def forward(self, token_embedding: Tensor)->Tensor:
+        """Add a positional encoding to the given embedding
+
+        Args:
+            token_embedding (Tensor): original embedding
+
+        Returns:
+            Tensor: the sum of the embedding and the positional encoding
+        """
+        return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])
+

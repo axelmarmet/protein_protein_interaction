@@ -13,7 +13,7 @@ from torch.utils.data import random_split
 from torch.nn.parameter import Parameter
 
 from ppi_pred.constants import MAX_LENGTH
-from ppi_pred.models.encoder_head.encodings.positional_encoding import PositionalEncoding
+from ppi_pred.models.encoder_head.encodings.positional_encoding import SinCosPositionalEncoding
 from ppi_pred.models.encoder_head.encodings.segment_encoding import SegmentEncoding
 from ppi_pred.dataset.embedding_seq_dataset import *
 

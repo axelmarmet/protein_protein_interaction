@@ -16,7 +16,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import random_split
 
 from ppi_pred.constants import MAX_LENGTH
-from ppi_pred.models.encoder_head.encodings.positional_encoding import PositionalEncoding
+from ppi_pred.models.encoder_head.encodings.positional_encoding import SinCosPositionalEncoding, TrainablePositionalEncoding
 from ppi_pred.models.encoder_head.encodings.segment_encoding import SegmentEncoding
 from ppi_pred.dataset.embedding_seq_dataset import *
 
@@ -59,8 +59,15 @@ class NaivePPILanguageModel(nn.Module):
 
         self.classifier = nn.Linear(embedding_dim, 1)
 
-        self.positional_encoding = PositionalEncoding(
-            embedding_dim, dropout=config["dropout"], maxlen=MAX_LENGTH)
+        if(config["pos_encoding"] == 'sincos'):
+            self.positional_encoding = SinCosPositionalEncoding(embedding_dim, dropout=config["dropout"], 
+                                                                maxlen=MAX_LENGTH)
+        elif(config["pos_encoding"] == 'trainable'):
+            self.positional_encoding = TrainablePositionalEncoding(embedding_dim, dropout=config["dropout"], 
+                                                                   maxlen=MAX_LENGTH)
+
+
+
         self.fst_seq_encoding = SegmentEncoding(embedding_dim, dropout=config["dropout"])
         self.snd_seq_encoding = SegmentEncoding(embedding_dim, dropout=config["dropout"])
 
