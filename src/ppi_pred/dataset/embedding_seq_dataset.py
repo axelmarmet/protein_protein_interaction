@@ -31,11 +31,6 @@ class EmbeddingSeqInput:
         self.segment1_mask = self.segment1_mask.to(device)
         self.segment2_mask = self.segment2_mask.to(device)
 
-
-
-
-
-
 class EmbeddingSeqDataset(Dataset):
 
     RATIOS = [337433, 42179, 42180]
@@ -120,7 +115,7 @@ class EmbeddingSeqDataset(Dataset):
         padded_sep_mask = []
         padded_segment1_mask = []
         padded_segment2_mask = []
-        for seq, cls_mask, sep_mask, seg1_mask, seg2_mask in zip(seq_list, cls_mask_list, sep_mask_list, 
+        for seq, cls_mask, sep_mask, seg1_mask, seg2_mask in zip(seq_list, cls_mask_list, sep_mask_list,
                                                                  segment1_mask_list, segment2_mask_list):
             seq_len:int = seq.shape[0]
             padding_length = max_seq_len - seq_len
@@ -143,7 +138,7 @@ class EmbeddingSeqDataset(Dataset):
             )
 
         tgt_batch = torch.stack(tgt_list)
-        
+
         return EmbeddingSeqInput(
             seq=torch.stack(padded_sequences),
             cls_mask=torch.stack(padded_cls_mask),

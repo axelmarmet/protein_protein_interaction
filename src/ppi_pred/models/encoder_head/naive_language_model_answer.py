@@ -28,7 +28,7 @@ from torch.utils.data import random_split
 
 import json
 
-from ppi_pred.utils import cleanup, set_seed, setup
+from ppi_pred.utils import cleanup, set_seed, setup, validate_config
 
 import wandb
 
@@ -115,19 +115,15 @@ def run(args:Namespace, rank:int, world_size:int):
         args.device = rank
 
     config = json.load(open(args.config, "r"))
+    validate_config(config)
     set_seed(config["seed"])
 
     # get the dataset
- #   labels_file = "data/training_set.pkl"
- #   dataframe = pd.read_pickle(labels_file)
- #   dataset_path = "data/MSA_transformer_embeddings"
-
-    labels_file = "../../../../dataset/training_set.pkl"
+    labels_file = os.path.join(args.data_root, "training_set.pkl")
+    assert os.path.exists(labels_file), f"file {labels_file} does not exist"
     dataframe = pd.read_pickle(labels_file)
-    dataset_path = "../../../../dataset"
-
     layer = 12
-    dataset = EmbeddingSeqDataset(dataframe, dataset_path, layer, True)
+    dataset = EmbeddingSeqDataset(dataframe, args.data_root, layer, True)
 
     model = NaivePPILanguageModel(config["architecture"])
     model = model.to(args.device)
@@ -155,7 +151,10 @@ if __name__ == "__main__":
             Train an encoder head on top of the embeddings
         """
     )
-
+    arg_parser.add_argument(
+        "--data_root", type=str, required=True, help="""
+        The path to the folder containing training_set.pkl and MSA_transformer_embeddings
+    """)
     arg_parser.add_argument(
         "--config", type=str, required=True, help="The config file that contains all hyperparameters"
     )
