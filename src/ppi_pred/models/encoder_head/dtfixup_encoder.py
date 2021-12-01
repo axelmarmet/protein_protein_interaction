@@ -10,6 +10,7 @@ from torch import Tensor
 import pandas as pd
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import random_split
+from torch.nn.parameter import Parameter
 
 from ppi_pred.constants import MAX_LENGTH
 from ppi_pred.models.encoder_head.encodings.positional_encoding import PositionalEncoding
@@ -201,7 +202,6 @@ class EncoderLayer(nn.Module):
                            need_weights=False)[0]
         return self.dropout(x)
 
-
 def dt_fixup(model, max_norm, num_layers: int):
     """
     Taken from https://github.com/BorealisAI/DT-Fixup
@@ -209,7 +209,7 @@ def dt_fixup(model, max_norm, num_layers: int):
     Paper link https://arxiv.org/pdf/2012.15355.pdf
     """
 
-    def t_fix(params:nn.Parameter, scale):
+    def t_fix(params:List[Parameter], scale):
         for p in params:
             if len(p.data.size()) > 1:
                 p.data.div_(scale)
@@ -231,113 +231,13 @@ def dt_fixup(model, max_norm, num_layers: int):
     factor = (num_layers ** 0.5) * 2 * max_norm
     t_fix(dtfix_params, factor)
 
-class PPILanguageModel(nn.Module):
+class DTFixupEncoder(nn.TransformerEncoder):
 
     def __init__(self, embedding_dim, num_layers, max_input_norm):
-        super(PPILanguageModel, self).__init__()
-
-        self.embedding_dim = embedding_dim
-
         encoder_layer = EncoderLayer(
             d_model=embedding_dim,
             nhead=8,
             dim_feedforward=1024,
         )
-
-        self.encoder = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers
-        )
-
-        self.classifier = nn.Linear(embedding_dim, 1)
-
-        self.positional_encoding = PositionalEncoding(
-            embedding_dim, dropout=0.1, maxlen=MAX_LENGTH)
-        self.fst_seq_encoding = SegmentEncoding(embedding_dim, dropout=0.1)
-        self.snd_seq_encoding = SegmentEncoding(embedding_dim, dropout=0.1)
-
-        self.cls_embedding = nn.parameter.Parameter(
-            torch.randn(embedding_dim), requires_grad=True)
-        self.sep_embedding = nn.parameter.Parameter(
-            torch.randn(embedding_dim), requires_grad=True)
-
+        super(DTFixupEncoder, self).__init__(encoder_layer, num_layers)
         dt_fixup(self, max_input_norm, num_layers)
-
-    def forward(self, fst_seq: Tensor, fst_seq_pad_mask: Tensor,
-                  snd_seq: Tensor, snd_seq_pad_mask: Tensor):
-        """ forward iteration
-        Args:
-            fst_seq (Tensor): shape  `seq_1_len x batch_dim x embedding_dim`
-            fst_seq_pad_mask (Tensor): shape  `batch_dim x seq_1_len`
-            snd_seq (Tensor): shape `seq_2_len x batch_dim x embedding_dim`
-            snd_seq_pad_mask (Tensor): shape  `batch_dim x seq_2_len`
-        """
-
-        # validate a bit the inputs
-        fst_seq_len, batch_dim, embedding_dim = fst_seq.shape
-        snd_seq_len, batch_dim_, embedding_dim_ = snd_seq.shape
-        batch_dim__, fst_seq_len_ = fst_seq_pad_mask.shape
-        batch_dim___, snd_seq_len_ = snd_seq_pad_mask.shape
-
-        assert batch_dim == batch_dim_ and \
-               batch_dim_ == batch_dim__ and \
-               batch_dim__ == batch_dim___, "batch dim of the two sequences are not the same"
-        assert fst_seq_len == fst_seq_len_, "seq and padding do not have the same seq length"
-        assert snd_seq_len == snd_seq_len_, "seq and padding do not have the same seq length"
-        assert embedding_dim == embedding_dim_, "embedding dim of the two sequences are not the same"
-
-        device = fst_seq.device
-
-        fst_segment = torch.cat([
-            self.cls_embedding.tile((1, batch_dim, 1)),
-            fst_seq,
-            self.sep_embedding.tile((1, batch_dim, 1))
-        ], 0)
-
-        snd_segment = torch.cat([
-            snd_seq,
-            self.sep_embedding.tile((1, batch_dim, 1))
-        ], 0)
-
-        fst_segment = self.fst_seq_encoding(fst_segment)
-        snd_segment = self.snd_seq_encoding(snd_segment)
-
-        encoder_input = torch.cat([fst_segment, snd_segment], 0)
-        padding_mask = torch.cat([
-            torch.zeros((batch_dim, 1), dtype=torch.bool, device=device), # for cls token
-            fst_seq_pad_mask,
-            torch.zeros((batch_dim, 1), dtype=torch.bool, device=device), # for sep token
-            snd_seq_pad_mask,
-            torch.zeros((batch_dim, 1), dtype=torch.bool, device=device)  # for sep token
-        ], dim=1)
-
-        encoder_input = self.positional_encoding(encoder_input)
-
-        cls_token_embedding = self.encoder(encoder_input, src_key_padding_mask=padding_mask)[0,:]
-        print(f"mean : {cls_token_embedding.mean()}")
-        print(f"std : {cls_token_embedding.std()}")
-        print(f"classifier_weights mean: {self.classifier.weight.mean()}" )
-        print(f"classifier_weights std: {self.classifier.weight.std()}" )
-        logits = self.classifier(cls_token_embedding)
-
-        return torch.sigmoid(logits)
-
-args = Namespace(device="cuda:1")
-
-labels_file = "data/training_set.pkl"
-dataframe = pd.read_pickle(labels_file)
-dataset_path = "data/MSA_transformer_embeddings"
-layer = 11
-dataset = EmbeddingSeqDataset(dataframe, dataset_path, layer)
-ratios = [29675, 3709, 3709]
-
-training_set, validation_set, testing_set = random_split(dataset, ratios)
-
-model = PPILanguageModel(EMBEDDING_DIM, 2, MAX_NORM).to(args.device)
-
-dataloaders = {}
-dataloaders['train'] = DataLoader(training_set, batch_size=64, shuffle=True, collate_fn=collate_fn)
-dataloaders['val'] = DataLoader(validation_set, batch_size=64, shuffle=True, collate_fn=collate_fn)
-dataloaders['test'] = DataLoader(testing_set, batch_size=64, shuffle=True, collate_fn=collate_fn)
-
-train(dataloaders, model, args)
