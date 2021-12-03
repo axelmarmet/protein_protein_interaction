@@ -30,10 +30,11 @@ class EmbeddingSeqInput:
         self.sep_mask = self.sep_mask.to(device)
         self.segment1_mask = self.segment1_mask.to(device)
         self.segment2_mask = self.segment2_mask.to(device)
+        self.padding_mask = self.padding_mask.to(device)
 
 class EmbeddingSeqDataset(Dataset):
 
-    RATIOS = [337433, 42179, 42180]
+    RATIOS = [411792, 5000, 5000]
 
     # should be computed dynamically but I'm lazy
     EMBEDDING_DIM = 768

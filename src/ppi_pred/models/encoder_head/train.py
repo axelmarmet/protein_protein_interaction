@@ -9,11 +9,13 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 from typing import Dict, Any
+from torch import Tensor
 
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import DistributedSampler
 
 from ppi_pred.dataset.embedding_seq_dataset import EmbeddingSeqDataset
+from ppi_pred.metrics import metrics
 
 from ppi_pred.models.encoder_head.scheduled_optimizer import ScheduledOptim
 
@@ -27,12 +29,13 @@ import wandb
 def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespace):
 
     should_log = not (args.distributed and (not args.is_main))
-    if should_log:
+    if should_log and args.use_wandb:
         wandb.init(
             project="transformer",
             entity="ppi_pred_dl4nlp",
             config=config
         )
+        wandb.watch(model, log='all')
 
     training_config = config["training"]
 
@@ -41,6 +44,9 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
     train_split, val_split, test_split = dataset.split()
     sampler = DistributedSampler(train_split) if args.distributed else None
     dataloaders = {}
+
+    assert training_config["simulated_batch_size"] % training_config["batch_size"] == 0
+    steps_before_opt = training_config["simulated_batch_size"] // training_config["batch_size"]
 
     # we divide the batch size by the world_size so that the total
     # batch size does not vary with the number of GPUs used
@@ -79,24 +85,30 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
 
         total_loss = torch.zeros((1), device=args.device)
         model.train()
-        for batch, tgt in tqdm(dataloaders['train'], disable=not should_log):
+        for i, (batch, tgt) in enumerate(tqdm(dataloaders['train'], disable=not should_log)):
             batch.to(args.device)
             tgt = tgt.to(args.device)
 
-            opt.zero_grad()
             pred = model(batch)
-            loss = criterion(pred, tgt.float())
+            loss = criterion(pred, tgt.float()) / steps_before_opt
 
             total_loss += loss
             loss.backward()
-            opt.step_and_update_lr()
+
+            if i % steps_before_opt == steps_before_opt-1:
+                opt.step_and_update_lr()
+                opt.zero_grad()
+
+            if i == 100:
+                break
 
         # get mean loss and not sum of mean batch loss
         total_loss /= epochs
-        dist.reduce(total_loss, 0, dist.ReduceOp.SUM)
-        total_loss /= args.world_size
+        if args.distributed:
+            dist.reduce(total_loss, 0, dist.ReduceOp.SUM)
+            total_loss /= args.world_size
 
-        accs = test(dataloaders, model, args.device, verbose=should_log)
+        accs = test(dataloaders, model, args, verbose=should_log)
         if val_max < accs['val'] and should_log:
             val_max = accs['val']
             best_model = copy.deepcopy(model)
@@ -104,19 +116,22 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
         if should_log:
             print("Epoch {}: Validation: {:.4f}. Test: {:.4f}, Loss: {:.4f}".format(
                 epoch + 1, accs['val'], accs['test'], total_loss.item()))
-            wandb.log({
-                "training loss": total_loss,
-                "validation accuracy": accs['val'],
-                "test accuracy": accs['test']
-            })
+            if args.use_wandb:
+                wandb.log({
+                    "training loss": total_loss,
+                    "validation accuracy": accs['val'],
+                    "test accuracy": accs['test']
+                })
 
-    final_accs = test(dataloaders, best_model, args.device, should_log)
+    final_accs = test(dataloaders, best_model, args, should_log)
     if should_log:
         print("FINAL MODEL: Validation: {:.4f}. Test: {:.4f}".format(final_accs['val'], final_accs['test']))
 
     return best_model
 
-def test(dataloaders, model, device, verbose):
+
+def test(dataloaders, model, args:Namespace, verbose:bool):
+
     model.eval()
 
     accs = {}
@@ -124,17 +139,23 @@ def test(dataloaders, model, device, verbose):
         if dataset == "train":
             continue
 
-        labels = []
-        predictions = []
-        for batch, tgt in tqdm(dataloaders[dataset], disable=not verbose):
-            batch.to(device)
-            tgt = tgt.to(device)
+        results = []
+        for inp, tgt in tqdm(dataloaders[dataset], disable=not verbose):
+            inp.to(args.device)
+            pred = model(inp)
 
-            pred = model(seq_1, pad_1, seq_2, pad_2)
-            predictions.append(pred.round().cpu().detach().numpy())
-            labels.append(tgt.cpu().numpy())
+            pred:Tensor = model.forward(inp).round().detach().cpu()
 
-        predictions = np.concatenate(predictions)
-        labels = np.concatenate(labels)
-        accs[dataset] = accuracy_score(labels, predictions)
+            res = metrics(pred.reshape(-1, 1), tgt.reshape(-1))
+
+            results.append(res)
+
+        accs[dataset] = results = torch.cat(results).mean()
+
+    if args.distributed:
+        for value in accs.values():
+            dist.reduce(value, 0, dist.ReduceOp.SUM)
+
+    accs = {key:val.item() / args.world_size for key, val in accs.items()}
+
     return accs

@@ -60,10 +60,10 @@ class NaivePPILanguageModel(nn.Module):
         self.classifier = nn.Linear(embedding_dim, 1)
 
         if(config["pos_encoding"] == 'sincos'):
-            self.positional_encoding = SinCosPositionalEncoding(embedding_dim, dropout=config["dropout"], 
+            self.positional_encoding = SinCosPositionalEncoding(embedding_dim, dropout=config["dropout"],
                                                                 maxlen=MAX_LENGTH)
         elif(config["pos_encoding"] == 'trainable'):
-            self.positional_encoding = TrainablePositionalEncoding(embedding_dim, dropout=config["dropout"], 
+            self.positional_encoding = TrainablePositionalEncoding(embedding_dim, dropout=config["dropout"],
                                                                    maxlen=MAX_LENGTH)
 
 
@@ -91,7 +91,7 @@ class NaivePPILanguageModel(nn.Module):
         fst_segment = self.fst_seq_encoding(fst_segment)
         snd_segment = self.snd_seq_encoding(snd_segment)
 
-        encoder_input = torch.zeros(seq.shape)
+        encoder_input = torch.zeros(seq.shape, device=device)
         encoder_input[inp.segment1_mask] = fst_segment
         encoder_input[inp.segment2_mask] = snd_segment
 
@@ -128,9 +128,11 @@ def run(args:Namespace, rank:int, world_size:int):
     # get the dataset
     labels_file = os.path.join(args.data_root, "training_set.pkl")
     assert os.path.exists(labels_file), f"file {labels_file} does not exist"
+    embeddings_dir = os.path.join(args.data_root, "MSA_transformer_embeddings")
+    assert os.path.exists(embeddings_dir), f"directory {embeddings_dir} does not exist"
     dataframe = pd.read_pickle(labels_file)
     layer = 12
-    dataset = EmbeddingSeqDataset(dataframe, args.data_root, layer, True)
+    dataset = EmbeddingSeqDataset(dataframe, embeddings_dir, layer, True)
 
     model = NaivePPILanguageModel(config["architecture"])
     model = model.to(args.device)
@@ -168,6 +170,8 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         "--device", type=str, default="cpu", help="The device on which to run the training (default : cpu)"
     )
+    arg_parser.add_argument('--use_wandb', dest='use_wandb', action='store_true')
+
     arg_parser.add_argument('--distributed', dest='distributed', action='store_true', help="""
         use distributed training, if set then device must not be specified
     """)
