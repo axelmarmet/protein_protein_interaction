@@ -166,7 +166,7 @@ def test(dataloaders, model, args):
         for (batch, label) in dataloaders[dataset]:
             batch = batch.to(args.device)
             pred = model(batch)
-            predictions.append(pred.round().cpu().detach().numpy())
+            predictions.append(pred.cpu().detach().numpy())
             labels.append(label.cpu().numpy())
 
         predictions = torch.tensor(np.concatenate(predictions))
