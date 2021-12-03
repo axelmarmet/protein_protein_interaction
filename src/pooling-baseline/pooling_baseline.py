@@ -15,7 +15,7 @@ from sklearn.metrics import accuracy_score
 
 from ppi_pred.models.pooling_baseline_model import MLP
 from ppi_pred.dataset.pooling_baseline_dataset import PoolingDataset
-
+from ppi_pred.metrics import *
 
 def set_seed(seed=44):
     np.random.seed(seed)
@@ -31,6 +31,8 @@ def arg_parse():
                         help='CPU / GPU device.')
     parser.add_argument('--epochs', type=int,
                         help='Number of epochs to train.')
+    parser.add_argument('--batch_size', type=int,
+                        help='Batch size during training.')
     parser.add_argument('--hidden_dim', type=int,
                         help='Hidden dimension of GNN.')
     parser.add_argument('--num_layers', type=int,
@@ -43,12 +45,15 @@ def arg_parse():
                         help='The dropout ratio.')
     parser.add_argument('--lr', type=float,
                         help='Learning rate.')
+    parser.add_argument('--gamma', type=float,
+                        help='Gamma for focal loss.')
     parser.add_argument('--pooling', type=str,
                         help='Type of pooling.')
     
     parser.set_defaults(
         device='cuda:0',
-        epochs=100,
+        epochs=200,
+        batch_size=128,
         hidden_dim=128,
         num_layers=4,
         opt='adam',
@@ -56,6 +61,7 @@ def arg_parse():
         dropout=0.3,
         lr=1e-3,
         pooling='mean',
+        gamma=2,
     )
     return parser.parse_args()
 
@@ -79,13 +85,12 @@ def train(dataloaders, input_dim, args):
     model = model_cls(input_dim, args.hidden_dim, args).to(args.device)
     opt = build_optimizer(args, model.parameters())
 
-    if(args.logging):
-        config = {k:v for k, v in vars(args).items() if k not in ["device", "logging"]}
-        wandb.init(
-                project="pooling-baseline",
-                entity="ppi_pred_dl4nlp",
-                config=config
-            )
+    config = {k:v for k, v in vars(args).items()}
+    wandb.init(
+            project="pooling-baseline",
+            entity="ppi_pred_dl4nlp",
+            config=config
+        )
 
     best_model = model
     val_max = -np.inf
@@ -103,33 +108,58 @@ def train(dataloaders, input_dim, args):
             loss.backward()
             opt.step()
 
-        accs = test(dataloaders, model, args)
-        if val_max < accs['val']:
-            val_max = accs['val']
+        scores = test(dataloaders, model, args)
+        if val_max < scores['val']['acc']:
+            val_max = scores['val']['acc']
             best_model = copy.deepcopy(model)
 
-        if(args.logging):
-            wandb.log({
-                    "training loss": total_loss,
-                    "training accuracy":accs['train'],
-                    "validation accuracy": accs['val'],
-                    "test accuracy": accs['test']
-                })
 
-        print("Epoch {}: Train: {:.4f}, Validation: {:.4f}. Test: {:.4f}, Loss: {:.4f}".format(
-            epoch + 1, accs['train'], accs['val'], accs['test'], total_loss))
+        wandb.log({
+                "training loss": total_loss,
+
+                "training accuracy": scores['train']['acc'],
+                "validation accuracy": scores['val']['acc'],
+                "test accuracy": scores['test']['acc'],
+
+                "training precision": scores['train']['precision'],
+                "validation precision": scores['val']['precision'],
+                "test precision": scores['test']['precision'],
+
+                "training recall": scores['train']['recall'],
+                "validation recall": scores['val']['recall'],
+                "test recall": scores['test']['recall'],
+
+                "training fbeta": scores['train']['fbeta'],
+                "validation fbeta": scores['val']['fbeta'],
+                "test fbeta": scores['test']['fbeta'],
+
+                "training average precision": scores['train']['AP_score'],
+                "validation average precision": scores['val']['AP_score'],
+                "test average precision": scores['test']['AP_score'],
+
+                "training AUC PR": scores['train']['AUC_PRC'],
+                "validation AUC PR": scores['val']['AUC_PRC'],
+                "test AUC PR": scores['test']['AUC_PRC'],
+
+                "training AUC ROC": scores['train']['AUC_ROC'],
+                "validation AUC ROC": scores['val']['AUC_ROC'],
+                "test AUC ROC": scores['test']['AUC_ROC'],
+            })
+
+        print("Epoch {}:\nTrain: {}\nValidation: {}\nTest: {}\nLoss: {}\n".format(
+              epoch + 1, scores['train'], scores['val'], scores['test'], total_loss))
 
 
-    final_accs = test(dataloaders, best_model, args)
-    print("FINAL MODEL: Train: {:.4f}, Validation: {:.4f}. Test: {:.4f}".format(
-            final_accs['train'], final_accs['val'], final_accs['test']))
-    return best_model, final_accs
+    final_scores = test(dataloaders, best_model, args)
+    print("FINAL MODEL:\nTrain: {}\nValidation: {}\nTest: {}\n".format(
+          final_scores['train'], final_scores['val'], final_scores['test']))
+    return best_model, final_scores
 
 
 def test(dataloaders, model, args):
     model.eval()
 
-    accs = {}
+    scores = {}
     for dataset in dataloaders:
         labels = []
         predictions = []
@@ -139,10 +169,10 @@ def test(dataloaders, model, args):
             predictions.append(pred.round().cpu().detach().numpy())
             labels.append(label.cpu().numpy())
 
-        predictions = np.concatenate(predictions)
-        labels = np.concatenate(labels)
-        accs[dataset] = accuracy_score(labels, predictions)
-    return accs
+        predictions = torch.tensor(np.concatenate(predictions))
+        labels = torch.tensor(np.concatenate(labels))
+        scores[dataset] = metrics(predictions, labels)
+    return scores
 
 
 
@@ -155,51 +185,47 @@ if __name__ == "__main__":
      
     args.device = (args.device if torch.cuda.is_available() else 'cpu')
     dataset_directory = "../../dataset"
-    labels_file = dataset_directory + "/training_set.pkl"
+    training_file = dataset_directory + "/training_set.pkl"
+    test_file = dataset_directory + "/test_set.pkl"
 
+    set_seed()
 
-    accs = np.zeros(5)
-    for seed in range(5):
-        set_seed(seed + 1)
-        args.logging = (seed + 1) == 1
+    print(f"Generating dataset")
+    training_data = pd.read_pickle(training_file)
+    test_data = pd.read_pickle(test_file)
+    
+    """
+    valid_instances = []
+    for i in range(data.shape[0]):
+        sequence1 = data.iloc[i, 0]
+        sequence2 = data.iloc[i, 1]
 
-        print(f"Generating dataset {seed + 1}")
+        if(not Path(f"{dataset_directory}/{sequence1}").exists()):
+            continue
 
-        data = pd.read_pickle(labels_file)
-        valid_instances = []
-        for i in range(data.shape[0]):
-            sequence1 = data.iloc[i, 0]
-            sequence2 = data.iloc[i, 1]
+        if(not Path(f"{dataset_directory}/{sequence2}").exists()):
+            continue
 
-            if(not Path(f"{dataset_directory}/{sequence1}").exists()):
-                continue
+        valid_instances.append(i)
 
-            if(not Path(f"{dataset_directory}/{sequence2}").exists()):
-                continue
+    valid_instances = np.array(valid_instances)
+    data = data.iloc[valid_instances, :]
+    """
+    training_data = training_data.sample(frac=1)
 
-            valid_instances.append(i)
+    num_instances = training_data.shape[0]
+    split = [0.85, 0.15]
+    split_num = int(split[0] * num_instances)
 
-        valid_instances = np.array(valid_instances)
-        data = data.iloc[valid_instances, :]
-        data = data.sample(frac=1)
+    train_dataset = PoolingDataset(training_data.iloc[:split_num, :], dataset_directory, args.pooling)
+    val_dataset = PoolingDataset(training_data.iloc[split_num:, :], dataset_directory, args.pooling)
+    test_dataset = PoolingDataset(test_data, dataset_directory, args.pooling)
 
-        num_instances = data.shape[0]
-        split = [0.8, 0.1, 0.1]
-        split_num = [int(split[0] * num_instances), int((split[0] + split[1]) * num_instances)]
+    input_dim = train_dataset.input_dim
 
-        train_dataset = PoolingDataset(data.iloc[:split_num[0], :], dataset_directory, args.pooling)
-        val_dataset = PoolingDataset(data.iloc[split_num[0]:split_num[1], :], dataset_directory, args.pooling)
-        test_dataset = PoolingDataset(data.iloc[split_num[1]:, :], dataset_directory, args.pooling)
+    dataloaders = {}
+    dataloaders['train'] = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    dataloaders['val'] = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+    dataloaders['test'] = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-
-        input_dim = train_dataset.input_dim
-
-        dataloaders = {}
-        dataloaders['train'] = DataLoader(train_dataset, batch_size=64, shuffle=True)
-        dataloaders['val'] = DataLoader(val_dataset, batch_size=64, shuffle=False)
-        dataloaders['test'] = DataLoader(test_dataset, batch_size=64, shuffle=False)
-
-        _, acc = train(dataloaders, input_dim, args)
-        accs[seed] = acc['test']
-
-print(f"OVERALL RESULT: {np.mean(accs)} +- {np.std(accs)}")
+    _, scores = train(dataloaders, input_dim, args)
