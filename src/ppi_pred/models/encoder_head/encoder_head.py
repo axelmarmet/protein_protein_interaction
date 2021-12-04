@@ -45,8 +45,7 @@ class NaivePPILanguageModel(nn.Module):
             d_model=embedding_dim,
             nhead=config["nhead"],
             dim_feedforward=config["dim_feedforward"],
-            dropout=config["dropout"],
-            norm_first=config["norm_first"]
+            dropout=config["dropout"]
         )
 
         encoder_norm = nn.LayerNorm(embedding_dim)
