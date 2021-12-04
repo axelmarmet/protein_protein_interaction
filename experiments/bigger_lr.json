@@ -10,6 +10,7 @@
     },
 
     "architecture":{
+        "transformer_type":"standard",
         "e_dim"           : 768,
         "layers"          : 1,
         "dim_feedforward" : 1024,
