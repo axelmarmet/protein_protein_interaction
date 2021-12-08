@@ -15,7 +15,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data import DistributedSampler
 
 from ppi_pred.dataset.embedding_seq_dataset import EmbeddingSeqDataset
-from ppi_pred.metrics import metrics
+from ppi_pred.metrics import metrics, print_metrics
 
 from ppi_pred.models.encoder_head.scheduled_optimizer import ScheduledOptim
 
@@ -25,6 +25,8 @@ import numpy as np
 from sklearn.metrics import accuracy_score
 
 import wandb
+
+from ppi_pred.utils import all_gather, get_loss
 
 def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespace):
 
@@ -42,7 +44,6 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
 
     # get the dataloaders
     train_split, val_split, test_split = dataset.split()
-    sampler = DistributedSampler(train_split) if args.distributed else None
     dataloaders = {}
 
     assert training_config["simulated_batch_size"] % training_config["batch_size"] == 0
@@ -55,9 +56,9 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
         f"number of gpus ({args.world_size})"
     batch_size = training_config["batch_size"] // args.world_size
 
-    dataloaders['train'] = DataLoader(train_split, batch_size=batch_size, shuffle=sampler is None, sampler=sampler, collate_fn=dataset.collate_fn)
-    dataloaders['val'] =   DataLoader(val_split,   batch_size=batch_size, collate_fn=dataset.collate_fn)
-    dataloaders['test'] =  DataLoader(test_split,  batch_size=batch_size, collate_fn=dataset.collate_fn)
+    dataloaders['train'] = dataset.get_dataloader_for_split(train_split, batch_size, True, args.distributed)
+    dataloaders['val'] = dataset.get_dataloader_for_split(val_split, batch_size, False, False)
+    dataloaders['test'] = dataset.get_dataloader_for_split(test_split, batch_size, False, False)
 
     # get the optimizer
     opt = ScheduledOptim(
@@ -68,10 +69,7 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
     )
 
     # get the loss
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.Tensor([training_config["pos_weight"]])
-    ).to(args.device)
-
+    criterion = get_loss(training_config["loss_fn"]).to(args.device)
     epochs = training_config["epochs"]
 
     best_model = model
@@ -80,7 +78,7 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
 
         if args.distributed:
             # necessary for shuffling to work with the distributed sampler
-            sampler.set_epoch(epoch) # type:ignore
+            dataloaders['train'].sampler.set_epoch(epoch) # type:ignore
             dist.barrier()
 
         total_loss = torch.zeros((1), device=args.device)
@@ -99,8 +97,6 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
                 opt.step_and_update_lr()
                 opt.zero_grad()
 
-            if i == 100:
-                break
 
         # get mean loss and not sum of mean batch loss
         total_loss /= epochs
@@ -108,54 +104,49 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
             dist.reduce(total_loss, 0, dist.ReduceOp.SUM)
             total_loss /= args.world_size
 
-        accs = test(dataloaders, model, args, verbose=should_log)
-        if val_max < accs['val'] and should_log:
-            val_max = accs['val']
-            best_model = copy.deepcopy(model)
-
+        # computation done in excess (should be on only 1 GPU but is on all)
+        metrics = test(dataloaders["val"], model, args, verbose=should_log)
         if should_log:
-            print("Epoch {}: Validation: {:.4f}. Test: {:.4f}, Loss: {:.4f}".format(
-                epoch + 1, accs['val'], accs['test'], total_loss.item()))
+
+            if val_max < metrics['AUC_ROC'] and should_log:
+                val_max = metrics['AUC_ROC']
+                best_model = copy.deepcopy(model)
+
+            print(f"Epoch {epoch + 1}:")
+            print_metrics(metrics)
+
             if args.use_wandb:
                 wandb.log({
                     "training loss": total_loss,
-                    "validation accuracy": accs['val'],
-                    "test accuracy": accs['test']
+                    "classification metrics" : metrics
                 })
 
-    final_accs = test(dataloaders, best_model, args, should_log)
+    # computation done in excess (should be on only 1 GPU but is on all)
+    final_metrics = test(dataloaders["test"], best_model, args, should_log)
     if should_log:
-        print("FINAL MODEL: Validation: {:.4f}. Test: {:.4f}".format(final_accs['val'], final_accs['test']))
+        print("FINAL MODEL:")
+        print_metrics(final_metrics)
 
     return best_model
 
+# import gc
 
-def test(dataloaders, model, args:Namespace, verbose:bool):
+@torch.no_grad()
+def test(dataloader, model, args:Namespace, verbose:bool):
 
     model.eval()
 
-    accs = {}
-    for dataset in dataloaders:
-        if dataset == "train":
-            continue
+    preds = []
+    tgts = []
+    for inp, tgt in tqdm(dataloader, disable=not verbose):
+        inp.to(args.device)
+        pred = model(inp)
 
-        results = []
-        for inp, tgt in tqdm(dataloaders[dataset], disable=not verbose):
-            inp.to(args.device)
-            pred = model(inp)
+        pred:Tensor = model.forward(inp).cpu()
+        preds.append(pred)
+        tgts.append(tgt)
 
-            pred:Tensor = model.forward(inp).round().detach().cpu()
+    predictions = torch.cat(preds)
+    targets = torch.cat(tgts)
 
-            res = metrics(pred.reshape(-1, 1), tgt.reshape(-1))
-
-            results.append(res)
-
-        accs[dataset] = results = torch.cat(results).mean()
-
-    if args.distributed:
-        for value in accs.values():
-            dist.reduce(value, 0, dist.ReduceOp.SUM)
-
-    accs = {key:val.item() / args.world_size for key, val in accs.items()}
-
-    return accs
+    return metrics(predictions, targets)

@@ -11,8 +11,10 @@ import torch.nn as nn
 # for typing
 from torch import Tensor
 from typing import List, Tuple
+from torch.utils.data.dataloader import DataLoader
 
-from torch.utils.data.dataset import random_split
+from torch.utils.data.dataset import Subset, random_split
+from torch.utils.data.distributed import DistributedSampler
 
 @dataclass
 class EmbeddingSeqInput:
@@ -31,6 +33,33 @@ class EmbeddingSeqInput:
         self.segment1_mask = self.segment1_mask.to(device)
         self.segment2_mask = self.segment2_mask.to(device)
         self.padding_mask = self.padding_mask.to(device)
+
+    def pin_memory(self):
+        self.seq = self.seq.pin_memory()
+        self.cls_mask = self.cls_mask.pin_memory()
+        self.sep_mask = self.sep_mask.pin_memory()
+        self.segment1_mask = self.segment1_mask.pin_memory()
+        self.segment2_mask = self.segment2_mask.pin_memory()
+        self.padding_mask = self.padding_mask.pin_memory()
+        return self
+
+@dataclass
+class EmbeddingSeqBatch:
+    input  : EmbeddingSeqInput
+    target : Tensor
+
+    def to(self, device):
+        self.input.to(device)
+        self.target = self.target.to(device)
+
+    def pin_memory(self):
+        self.input = self.input.pin_memory()
+        self.target = self.target.pin_memory()
+        return self
+
+    def __iter__(self):
+        return iter((self.input, self.target))
+
 
 class EmbeddingSeqDataset(Dataset):
 
@@ -148,6 +177,19 @@ class EmbeddingSeqDataset(Dataset):
             segment1_mask=torch.stack(padded_segment1_mask),
             segment2_mask=torch.stack(padded_segment2_mask)), tgt_batch
 
+    def get_dataloader_for_split(self, subset:Subset['EmbeddingSeqDataset'], batch_size:int, shuffle:bool, distributed:bool):
+
+        dataloader_kws = {
+            "batch_size":batch_size,
+            "collate_fn":self.collate_fn,
+            "pin_memory":True,
+            "num_workers":4
+        }
+        if distributed:
+            sampler = DistributedSampler(subset, shuffle=shuffle)
+            return DataLoader(subset, sampler=sampler, shuffle=False, **dataloader_kws)
+        else:
+            return DataLoader(subset, shuffle=shuffle, **dataloader_kws)
 
     def split(self):
         return random_split(self, self.RATIOS, generator=torch.Generator().manual_seed(0))
