@@ -2,23 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=0.1, gamma=0):
-        super(FocalLoss, self).__init__()
-        # alpha is proportion of positive instances
-        # gamma is relaxation parameter
-        self.alpha = alpha
-        self.gamma = gamma
+from ppi_pred.models.focal_loss import FocalLoss
 
-    def forward(self, inputs, targets):
-        BCE_loss = F.binary_cross_entropy(inputs, targets, reduce=False)
-        p_t = torch.exp(-BCE_loss)
-
-        # if target = 1, use (1 - alpha), otherwise alpha 
-        alpha_tensor = (1 - self.alpha) * targets + self.alpha * (1 - targets)
-        f_loss = alpha_tensor * (1 - p_t) ** self.gamma * BCE_loss
-        return f_loss.mean()
-    
 
 
 class MLP(torch.nn.Module):
@@ -42,7 +27,7 @@ class MLP(torch.nn.Module):
 
         self.loss_function = FocalLoss(gamma=args.gamma)
 
-    
+
     def forward(self, x):
         for i in range(len(self.lin_layer) - 1):
             x = self.lin_layer[i](x)

@@ -1,3 +1,4 @@
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -109,3 +110,8 @@ def metrics(y_pred, y_true, beta = 0.5, threshold = 0.5, curve = False):
         plot_confusion_matrix(CM)
 
     return {"acc": acc, "precision": precision, "recall": recall, "fbeta" : fbeta, "CM": CM, "AP_score": AP_score, "AUC_PRC": auc_PRC_score, "AUC_ROC": auc_ROC_score}
+
+def print_metrics(metrics):
+    # pretty prints in a lazy way
+    metrics['CM'] = metrics['CM'].tolist()
+    print(json.dumps(metrics, sort_keys=True, indent=4))

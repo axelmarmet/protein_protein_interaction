@@ -99,7 +99,7 @@ class EmbeddingSeqDataset(Dataset):
 
         return embedding_seq_1, embedding_seq_2, target
 
-    def collate_fn(self, batch)->Tuple[EmbeddingSeqInput, Tensor]:
+    def collate_fn(self, batch)->EmbeddingSeqBatch:
         seq_list, cls_mask_list, sep_mask_list, segment1_mask_list, segment2_mask_list, tgt_list = [], [], [], [], [], []
         max_seq_len = -1
         for seq_1, seq_2, tgt in batch:
@@ -169,13 +169,13 @@ class EmbeddingSeqDataset(Dataset):
 
         tgt_batch = torch.stack(tgt_list)
 
-        return EmbeddingSeqInput(
+        return EmbeddingSeqBatch(EmbeddingSeqInput(
             seq=torch.stack(padded_sequences),
             cls_mask=torch.stack(padded_cls_mask),
             sep_mask=torch.stack(padded_sep_mask),
             padding_mask=torch.stack(padding_masks),
             segment1_mask=torch.stack(padded_segment1_mask),
-            segment2_mask=torch.stack(padded_segment2_mask)), tgt_batch
+            segment2_mask=torch.stack(padded_segment2_mask)), tgt_batch)
 
     def get_dataloader_for_split(self, subset:Subset['EmbeddingSeqDataset'], batch_size:int, shuffle:bool, distributed:bool):
 
