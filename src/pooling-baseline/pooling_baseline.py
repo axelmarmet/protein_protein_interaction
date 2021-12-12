@@ -192,7 +192,7 @@ if __name__ == "__main__":
         raise ValueError("Unsupported pooling operation.")
      
     args.device = (args.device if torch.cuda.is_available() else 'cpu')
-    dataset_directory = "../../dataset/MSA_transformer_embeddings"
+    dataset_directory = "../../dataset"
     training_file = dataset_directory + "/training_set.pkl"
     test_file = dataset_directory + "/test_set.pkl"
 

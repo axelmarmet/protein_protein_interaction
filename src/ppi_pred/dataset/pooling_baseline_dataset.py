@@ -11,9 +11,9 @@ class PoolingDataset(Dataset):
             sequence1 = data.iloc[i, 0]
             sequence2 = data.iloc[i, 1]
 
-            embedding1 = torch.load(f"{dataset_directory}/{sequence1}/embeddings_layer_12_MSA_Transformer.pt",
+            embedding1 = torch.load(f"{dataset_directory}/MSA_transformer_embeddings/{sequence1}/embeddings_layer_12_MSA_Transformer.pt",
                                     map_location=torch.device('cpu'))
-            embedding2 = torch.load(f"{dataset_directory}/{sequence2}/embeddings_layer_12_MSA_Transformer.pt",
+            embedding2 = torch.load(f"{dataset_directory}/MSA_transformer_embeddings/{sequence2}/embeddings_layer_12_MSA_Transformer.pt",
                                     map_location=torch.device('cpu'))
 
             if(pooling_operation == 'mean'):
