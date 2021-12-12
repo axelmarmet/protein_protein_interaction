@@ -57,7 +57,7 @@ def arg_parse():
         hidden_dim=128,
         num_layers=4,
         opt='adam',
-        weight_decay=1e-5,
+        weight_decay=5e-4,
         dropout=0.3,
         lr=1e-3,
         pooling='mean',
@@ -84,6 +84,11 @@ def train(dataloaders, input_dim, args):
     model_cls = MLP
     model = model_cls(input_dim, args.hidden_dim, args).to(args.device)
     opt = build_optimizer(args, model.parameters())
+    
+    # scheduler
+    scheduler_gamma = 0.9
+    lambda1 = lambda epoch: (1 - epoch/args.epochs)**scheduler_gamma 
+    scheduler = optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda1)
 
     config = {k:v for k, v in vars(args).items()}
     wandb.init(
@@ -108,11 +113,14 @@ def train(dataloaders, input_dim, args):
             loss.backward()
             opt.step()
 
+
         scores = test(dataloaders, model, args)
         if val_max < scores['val']['acc']:
             val_max = scores['val']['acc']
             best_model = copy.deepcopy(model)
 
+        if(scheduler is not None):
+            scheduler.step()
 
         wandb.log({
                 "training loss": total_loss,
