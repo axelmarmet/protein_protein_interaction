@@ -4,11 +4,10 @@
     "training":{
         "warmup_steps" : 4000,
         "lr_mult"      : 0.1,
-        "epochs"       : 30,
-        "batch_size"   : 8,
-        "simulated_batch_size" : 256,
+        "epochs"       : 50,
+        "batch_size"   : 16,
+        "simulated_batch_size" : 512,
         "loss_fn" : {
-
             "type"  : "focal_logits",
             "alpha" : 0.09,
             "gamma" : 2
@@ -18,8 +17,8 @@
     "architecture":{
         "transformer_type":"standard",
         "e_dim"           : 768,
-        "layers"          : 2,
-        "dim_feedforward" : 1024,
+        "layers"          : 4,
+        "dim_feedforward" : 2048,
         "nhead"           : 8,
         "dropout"         : 0.1,
         "pos_encoding"    : "trainable"

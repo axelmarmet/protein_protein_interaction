@@ -170,6 +170,7 @@ if __name__ == "__main__":
         "--device", type=str, default="cpu", help="The device on which to run the training (default : cpu)"
     )
     arg_parser.add_argument('--use_wandb', dest='use_wandb', action='store_true')
+    arg_parser.add_argument('--save_dir', type=str, required=True)
 
     arg_parser.add_argument('--distributed', dest='distributed', action='store_true', help="""
         use distributed training, if set then device must not be specified

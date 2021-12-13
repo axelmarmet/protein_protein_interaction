@@ -112,6 +112,9 @@ def train(model, dataset:EmbeddingSeqDataset, config:Dict[str,Any], args:Namespa
                 val_max = metrics['AUC_ROC']
                 best_model = copy.deepcopy(model)
 
+            path = os.path.join(args.save_dir, f"model_{epoch+1}.pkl")
+            torch.save(model.state_dict(), path)
+
             print(f"Epoch {epoch + 1}:")
             print_metrics(metrics)
 
