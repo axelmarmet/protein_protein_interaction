@@ -61,9 +61,9 @@ if __name__ == '__main__':
     model = NaivePPILanguageModel(config["architecture"])
 
     state_dict = torch.load(args.saved_state_dict)
-    print(state_dict)
+    state_dict = {k.partition('model.')[2]: v for k,v in state_dict}
 
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict) #type: ignore
     model = model.to(args.device)
 
     print_metrics(
