@@ -59,7 +59,11 @@ if __name__ == '__main__':
     validate_config(config)
 
     model = NaivePPILanguageModel(config["architecture"])
-    model.load_state_dict(torch.load(args.saved_state_dict))
+
+    state_dict = torch.load(args.saved_state_dict)
+    print(state_dict)
+
+    model.load_state_dict(state_dict)
     model = model.to(args.device)
 
     print_metrics(
