@@ -60,7 +60,7 @@ def arg_parse():
         weight_decay=5e-4,
         dropout=0.3,
         lr=1e-3,
-        pooling='mean',
+        pooling='max',
         gamma=2,
     )
     return parser.parse_args()
@@ -236,4 +236,7 @@ if __name__ == "__main__":
     dataloaders['val'] = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     dataloaders['test'] = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
-    _, scores = train(dataloaders, input_dim, args)
+    best_model, scores = train(dataloaders, input_dim, args)
+    checkpoint_path = "checkpoints"
+    Path(checkpoint_path).mkdir(parents=True, exist_ok=True)
+    torch.save(best_model, f"{checkpoint_path}/best_model.pt")
