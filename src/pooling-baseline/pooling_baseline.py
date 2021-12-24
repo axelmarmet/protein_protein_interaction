@@ -237,6 +237,6 @@ if __name__ == "__main__":
     dataloaders['test'] = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
 
     best_model, scores = train(dataloaders, input_dim, args)
-    checkpoint_path = "checkpoints"
+    checkpoint_path = f"checkpoints/{args.pooling}"
     Path(checkpoint_path).mkdir(parents=True, exist_ok=True)
     torch.save(best_model, f"{checkpoint_path}/best_model.pt")
