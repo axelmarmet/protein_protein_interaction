@@ -9,7 +9,6 @@ from ppi_pred.models.focal_loss import FocalLoss
 class MLP(torch.nn.Module):
     def __init__(self, input_dim, hidden_dim, args):
         super(MLP, self).__init__()
-        self.dropout = args.dropout
         self.num_layers = args.num_layers
 
         self.lin_layer = nn.ModuleList()
@@ -24,6 +23,7 @@ class MLP(torch.nn.Module):
 
         self.lin_layer.append(nn.Linear(hidden_dim, 1))
         self.sigmoid = nn.Sigmoid()
+        self.dropout = nn.Dropout(p=args.dropout)
 
         self.loss_function = FocalLoss(gamma=args.gamma)
 
@@ -33,7 +33,7 @@ class MLP(torch.nn.Module):
             x = self.lin_layer[i](x)
             x = self.batch_norm[i](x)
             x = F.relu(x)
-            x = F.dropout(x, p=self.dropout)
+            x = self.dropout(x)
 
         x = self.lin_layer[len(self.lin_layer) - 1](x)
         x = self.sigmoid(x).squeeze()
