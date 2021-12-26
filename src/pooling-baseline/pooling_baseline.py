@@ -115,8 +115,8 @@ def train(dataloaders, input_dim, args):
 
 
         scores = test(dataloaders, model, args)
-        if val_max < scores['val']['acc']:
-            val_max = scores['val']['acc']
+        if val_max < scores['val']['AUC_PRC']:
+            val_max = scores['val']['AUC_PRC']
             best_model = copy.deepcopy(model)
 
         if(scheduler is not None):
