@@ -1,4 +1,8 @@
-# protein_transformer
+# Protein Protein Interaction
+
+Multiple experiment to determine how to best use the MSA Transformer[[1]](#1) for the task of protein protein interaction prediction.
+
+## How to use
 
 Get the conda environment by running
 ```
@@ -9,7 +13,8 @@ Then install the local package by doing
 pip install -e .
 ```
 
-# General Knowledge
-
-## FASTA
-FASTA format is a text-based format for representing either nucleotide sequences or peptide sequences, in which base pairs or amino acids are represented using single-letter codes. A sequence in FASTA format begins with a single-line description, followed by lines of sequence data.
+## References
+<a id="1">[1]</a> 
+Roshan M Rao, Jason Liu, Robert Verkuil, Joshua Meier, John Canny, Pieter Abbeel, Tom Sercu, Alexander Rives
+MSA Transformer
+Proceedings of the 38th International Conference on Machine Learning, PMLR 139:8844-8856, 2021. 
